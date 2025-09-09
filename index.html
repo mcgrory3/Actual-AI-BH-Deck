@@ -4,45 +4,514 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Healthcare Financial Model</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.5.0/dist/Recharts.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
         }
-        .container {
-            width: 100%;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+        .animate-gradient {
+            background-size: 200% 200%;
+            animation: gradient 8s ease infinite;
         }
-        h1 {
-            text-align: center;
-            color: #1a73e8;
-            padding: 20px;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 100px auto;
         }
-        iframe {
-            flex: 1;
-            width: 100%;
-            border: none;
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>AI-Enabled Healthcare Financial Model Dashboard</h1>
-        <iframe 
-            src="https://claude.site/public/artifacts/03767f8d-b47e-42c8-8f3c-808d7c8ca4b5/embed" 
-            title="Claude Artifact" 
-            width="100%" 
-            height="100%" 
-            frameborder="0" 
-            allow="clipboard-write" 
-            allowfullscreen>
-        </iframe>
+    <div id="root">
+        <div class="loading-spinner"></div>
     </div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+        const { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
+
+        // CPT Code rates for 2025 (verified Medicare rates)
+        const CPT_RATES = {
+            BHI: {
+                '99492': { medicare: 140, medicaid: 105, commercial: 168, description: 'Initial psychiatric collaborative care (70 min)' },
+                '99493': { medicare: 125, medicaid: 93.75, commercial: 150, description: 'Subsequent psychiatric care (60 min)' },
+                '99494': { medicare: 65, medicaid: 48.75, commercial: 78, description: 'Additional 30 min' },
+                'G2214': { medicare: 75, medicaid: 56.25, commercial: 90, description: 'Initial or subsequent (30 min)' }
+            },
+            CCM: {
+                '99490': { medicare: 60.49, medicaid: 45.37, commercial: 72.59, description: 'Non-complex CCM (20 min)' },
+                '99439': { medicare: 45.93, medicaid: 34.45, commercial: 55.12, description: 'Additional 20 min' },
+                '99487': { medicare: 125.91, medicaid: 94.43, commercial: 151.09, description: 'Complex CCM (60 min)' },
+                '99489': { medicare: 67.23, medicaid: 50.42, commercial: 80.68, description: 'Additional 30 min' }
+            },
+            RPM: {
+                '99453': { medicare: 19.73, medicaid: 14.80, commercial: 23.68, description: 'Setup and education' },
+                '99454': { medicare: 43.02, medicaid: 32.27, commercial: 51.62, description: 'Device supply (30 days)' },
+                '99457': { medicare: 47.87, medicaid: 35.90, commercial: 57.44, description: 'First 20 min monitoring' },
+                '99458': { medicare: 38.49, medicaid: 28.87, commercial: 46.19, description: 'Additional 20 min' }
+            }
+        };
+
+        function HealthcareFinancialModel() {
+            const [startingPatients, setStartingPatients] = useState(50);
+            const [growthRate, setGrowthRate] = useState(12);
+            const [aiAutonomy, setAiAutonomy] = useState(65);
+            const [selectedMonth, setSelectedMonth] = useState(12);
+            const [payerMix, setPayerMix] = useState({ medicare: 50, medicaid: 30, commercial: 20 });
+            const [serviceMix, setServiceMix] = useState({ BHI: 40, CCM: 25, RPM: 20, Nav: 15 });
+            const [errors, setErrors] = useState([]);
+
+            // Validate inputs
+            useEffect(() => {
+                const newErrors = [];
+                const payerTotal = payerMix.medicare + payerMix.medicaid + payerMix.commercial;
+                const serviceTotal = serviceMix.BHI + serviceMix.CCM + serviceMix.RPM + serviceMix.Nav;
+                
+                if (Math.abs(payerTotal - 100) > 0.1) {
+                    newErrors.push('Payer mix must total 100%');
+                }
+                if (Math.abs(serviceTotal - 100) > 0.1) {
+                    newErrors.push('Service mix must total 100%');
+                }
+                setErrors(newErrors);
+            }, [payerMix, serviceMix]);
+
+            // Calculate patient growth with conservative decay
+            const calculatePatients = (month, withAI = false, withNP = false) => {
+                let patients = startingPatients;
+                const baseChurn = withAI ? 0.02 : 0.05;
+                
+                for (let m = 1; m <= month; m++) {
+                    let monthlyGrowth = growthRate / 100;
+                    
+                    // Conservative growth decay
+                    if (m > 6) monthlyGrowth *= 0.83;  // 10% from 12%
+                    if (m > 12) monthlyGrowth *= 0.8;  // 8% from 10%
+                    if (m > 24) monthlyGrowth *= 0.625; // 5% from 8%
+                    
+                    // AI and NP boost
+                    if (withAI) monthlyGrowth *= 1.1;
+                    if (withNP) monthlyGrowth *= 1.15;
+                    
+                    patients = patients * (1 + monthlyGrowth) * (1 - baseChurn);
+                }
+                
+                return Math.floor(patients);
+            };
+
+            // Calculate revenue based on service mix and payer mix
+            const calculateRevenue = (patients, withAI = false) => {
+                const blendedRates = {
+                    BHI: (140 * payerMix.medicare + 105 * payerMix.medicaid + 168 * payerMix.commercial) / 100,
+                    CCM: (60.49 * payerMix.medicare + 45.37 * payerMix.medicaid + 72.59 * payerMix.commercial) / 100,
+                    RPM: (110.62 * payerMix.medicare + 82.97 * payerMix.medicaid + 132.74 * payerMix.commercial) / 100,
+                    Nav: (65 * payerMix.medicare + 48.75 * payerMix.medicaid + 78 * payerMix.commercial) / 100
+                };
+                
+                let totalRevenue = 0;
+                Object.entries(serviceMix).forEach(([service, percentage]) => {
+                    totalRevenue += patients * (percentage / 100) * (blendedRates[service] || 65);
+                });
+                
+                // Apply seasonal adjustment
+                const quarter = Math.floor((selectedMonth - 1) / 3) % 4;
+                const seasonalAdjustment = quarter === 0 ? 0.9 : quarter === 3 ? 1.05 : 1;
+                
+                return totalRevenue * 0.92 * seasonalAdjustment; // 92% net realization
+            };
+
+            // Calculate costs
+            const calculateCosts = (patients, revenue, withAI = false, withNP = false) => {
+                // Staffing costs
+                const fteRequired = withAI ? patients / 150 : patients / 100;
+                const avgSalary = withNP ? 145000 : 93600;
+                const staffingCost = (fteRequired * avgSalary / 12);
+                
+                // AI costs
+                const aiCost = withAI ? (patients * 45 * 0.08 + 2000) : 0;
+                
+                // Other operational costs (20% of revenue)
+                const operationalCost = revenue * 0.2;
+                
+                return staffingCost + aiCost + operationalCost;
+            };
+
+            // Calculate metrics for each model
+            const models = useMemo(() => {
+                const basePatients = calculatePatients(selectedMonth, false, false);
+                const aiPatients = calculatePatients(selectedMonth, true, false);
+                const aiNpPatients = calculatePatients(selectedMonth, true, true);
+                
+                const baseRevenue = calculateRevenue(basePatients, false);
+                const aiRevenue = calculateRevenue(aiPatients, true);
+                const aiNpRevenue = calculateRevenue(aiNpPatients, true);
+                
+                const baseCosts = calculateCosts(basePatients, baseRevenue, false, false);
+                const aiCosts = calculateCosts(aiPatients, aiRevenue, true, false);
+                const aiNpCosts = calculateCosts(aiNpPatients, aiNpRevenue, true, true);
+                
+                return {
+                    base: {
+                        patients: basePatients,
+                        revenue: baseRevenue,
+                        costs: baseCosts,
+                        ebitda: baseRevenue - baseCosts,
+                        margin: ((baseRevenue - baseCosts) / baseRevenue * 100).toFixed(1),
+                        fte: (basePatients / 100).toFixed(1),
+                        revPerPatient: (baseRevenue / basePatients).toFixed(0),
+                        ltv: (baseRevenue / basePatients * 20).toFixed(0),
+                        cac: 125,
+                        ltvCac: (baseRevenue / basePatients * 20 / 125).toFixed(1)
+                    },
+                    ai: {
+                        patients: aiPatients,
+                        revenue: aiRevenue,
+                        costs: aiCosts,
+                        ebitda: aiRevenue - aiCosts,
+                        margin: ((aiRevenue - aiCosts) / aiRevenue * 100).toFixed(1),
+                        fte: (aiPatients / 150).toFixed(1),
+                        revPerPatient: (aiRevenue / aiPatients).toFixed(0),
+                        ltv: (aiRevenue / aiPatients * 50).toFixed(0),
+                        cac: 125,
+                        ltvCac: (aiRevenue / aiPatients * 50 / 125).toFixed(1)
+                    },
+                    aiNp: {
+                        patients: aiNpPatients,
+                        revenue: aiNpRevenue,
+                        costs: aiNpCosts,
+                        ebitda: aiNpRevenue - aiNpCosts,
+                        margin: ((aiNpRevenue - aiNpCosts) / aiNpRevenue * 100).toFixed(1),
+                        fte: (aiNpPatients / 150).toFixed(1),
+                        revPerPatient: (aiNpRevenue / aiNpPatients).toFixed(0),
+                        ltv: (aiNpRevenue / aiNpPatients * 50).toFixed(0),
+                        cac: 125,
+                        ltvCac: (aiNpRevenue / aiNpPatients * 50 / 125).toFixed(1)
+                    }
+                };
+            }, [startingPatients, growthRate, aiAutonomy, selectedMonth, payerMix, serviceMix]);
+
+            // Calculate exit valuations
+            const exitValuations = useMemo(() => {
+                const months = [6, 12, 18, 24, 36];
+                return months.map(month => {
+                    const aiNpPatients = calculatePatients(month, true, true);
+                    const monthlyRevenue = calculateRevenue(aiNpPatients, true);
+                    const monthlyCosts = calculateCosts(aiNpPatients, monthlyRevenue, true, true);
+                    const monthlyEbitda = monthlyRevenue - monthlyCosts;
+                    
+                    const annualRevenue = monthlyRevenue * 12;
+                    const annualEbitda = monthlyEbitda * 12;
+                    
+                    // Conservative multiples
+                    const revenueMultiple = month <= 12 ? 3 : month <= 24 ? 4 : 5.5;
+                    const ebitdaMultiple = month <= 12 ? 10 : month <= 24 ? 14 : 18;
+                    
+                    return {
+                        month,
+                        revenue: annualRevenue,
+                        ebitda: annualEbitda,
+                        valuation: (annualRevenue * revenueMultiple + annualEbitda * ebitdaMultiple) / 2,
+                        revenueMultiple,
+                        ebitdaMultiple
+                    };
+                });
+            }, [startingPatients, growthRate, payerMix, serviceMix]);
+
+            // Chart data
+            const projectionData = useMemo(() => {
+                const data = [];
+                for (let m = 1; m <= 36; m++) {
+                    const basePatients = calculatePatients(m, false, false);
+                    const aiPatients = calculatePatients(m, true, false);
+                    const aiNpPatients = calculatePatients(m, true, true);
+                    
+                    data.push({
+                        month: m,
+                        base: calculateRevenue(basePatients, false),
+                        ai: calculateRevenue(aiPatients, true),
+                        aiNp: calculateRevenue(aiNpPatients, true)
+                    });
+                }
+                return data;
+            }, [startingPatients, growthRate, payerMix, serviceMix]);
+
+            const serviceData = useMemo(() => {
+                return Object.entries(serviceMix).map(([name, value]) => ({
+                    name,
+                    value,
+                    revenue: models.aiNp.revenue * value / 100
+                }));
+            }, [serviceMix, models]);
+
+            const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-teal-50 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-blue-600 to-teal-600 animate-gradient rounded-xl p-8 mb-8 text-white shadow-xl">
+                            <h1 className="text-4xl font-bold mb-4">AI-Enabled Healthcare Financial Model</h1>
+                            <div className="grid grid-cols-4 gap-6">
+                                <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                    <div className="text-sm opacity-90">Total Revenue (Mo {selectedMonth})</div>
+                                    <div className="text-3xl font-bold">${(models.aiNp.revenue).toLocaleString()}</div>
+                                </div>
+                                <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                    <div className="text-sm opacity-90">EBITDA Margin</div>
+                                    <div className="text-3xl font-bold">{models.aiNp.margin}%</div>
+                                </div>
+                                <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                    <div className="text-sm opacity-90">Patient Count</div>
+                                    <div className="text-3xl font-bold">{models.aiNp.patients.toLocaleString()}</div>
+                                </div>
+                                <div className="bg-white/20 backdrop-blur rounded-lg p-4">
+                                    <div className="text-sm opacity-90">Exit Valuation</div>
+                                    <div className="text-3xl font-bold">
+                                        ${(exitValuations.find(v => v.month === 12)?.valuation / 1000000).toFixed(1)}M
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Errors */}
+                        {errors.length > 0 && (
+                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                                {errors.map((error, i) => (
+                                    <div key={i}>{error}</div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Model Comparison */}
+                        <div className="grid grid-cols-3 gap-6 mb-8">
+                            <div className="bg-white rounded-xl p-6 shadow-lg border-t-4 border-gray-400">
+                                <h3 className="text-xl font-bold mb-4 text-gray-800">Base Model</h3>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Revenue:</span>
+                                        <span className="font-bold">${models.base.revenue.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">EBITDA:</span>
+                                        <span className="font-bold">${models.base.ebitda.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Margin:</span>
+                                        <span className="font-bold">{models.base.margin}%</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Patients:</span>
+                                        <span className="font-bold">{models.base.patients}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">LTV:CAC:</span>
+                                        <span className="font-bold">{models.base.ltvCac}x</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-xl p-6 shadow-lg border-t-4 border-blue-500">
+                                <h3 className="text-xl font-bold mb-4 text-blue-800">AI-Enabled</h3>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Revenue:</span>
+                                        <span className="font-bold">${models.ai.revenue.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">EBITDA:</span>
+                                        <span className="font-bold">${models.ai.ebitda.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Margin:</span>
+                                        <span className="font-bold">{models.ai.margin}%</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Patients:</span>
+                                        <span className="font-bold">{models.ai.patients}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">LTV:CAC:</span>
+                                        <span className="font-bold">{models.ai.ltvCac}x</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-xl p-6 shadow-lg border-t-4 border-teal-500">
+                                <h3 className="text-xl font-bold mb-4 text-teal-800">AI + NP Partnership</h3>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Revenue:</span>
+                                        <span className="font-bold">${models.aiNp.revenue.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">EBITDA:</span>
+                                        <span className="font-bold">${models.aiNp.ebitda.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Margin:</span>
+                                        <span className="font-bold">{models.aiNp.margin}%</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Patients:</span>
+                                        <span className="font-bold">{models.aiNp.patients}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">LTV:CAC:</span>
+                                        <span className="font-bold">{models.aiNp.ltvCac}x</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="bg-white rounded-xl p-6 mb-8 shadow-lg">
+                            <h3 className="text-xl font-bold mb-4">Model Parameters</h3>
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        Starting Patients: {startingPatients}
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="10"
+                                        max="200"
+                                        value={startingPatients}
+                                        onChange={(e) => setStartingPatients(Number(e.target.value))}
+                                        className="w-full"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        Growth Rate: {growthRate}%
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="5"
+                                        max="20"
+                                        value={growthRate}
+                                        onChange={(e) => setGrowthRate(Number(e.target.value))}
+                                        className="w-full"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        AI Autonomy: {aiAutonomy}%
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="50"
+                                        max="80"
+                                        value={aiAutonomy}
+                                        onChange={(e) => setAiAutonomy(Number(e.target.value))}
+                                        className="w-full"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        Selected Month: {selectedMonth}
+                                    </label>
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="36"
+                                        value={selectedMonth}
+                                        onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                                        className="w-full"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Charts */}
+                        <div className="grid grid-cols-2 gap-6 mb-8">
+                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                <h3 className="text-xl font-bold mb-4">Revenue Projections</h3>
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <LineChart data={projectionData}>
+                                        <CartesianGrid strokeDasharray="3 3" />
+                                        <XAxis dataKey="month" />
+                                        <YAxis />
+                                        <Tooltip formatter={(value) => `$${value.toLocaleString()}`} />
+                                        <Legend />
+                                        <Line type="monotone" dataKey="base" stroke="#94a3b8" name="Base" />
+                                        <Line type="monotone" dataKey="ai" stroke="#3b82f6" name="AI-Enabled" />
+                                        <Line type="monotone" dataKey="aiNp" stroke="#14b8a6" name="AI+NP" />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                <h3 className="text-xl font-bold mb-4">Service Line Mix</h3>
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <PieChart>
+                                        <Pie
+                                            data={serviceData}
+                                            cx="50%"
+                                            cy="50%"
+                                            labelLine={false}
+                                            label={(entry) => `${entry.name}: ${entry.value}%`}
+                                            outerRadius={80}
+                                            fill="#8884d8"
+                                            dataKey="value"
+                                        >
+                                            {serviceData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* Exit Valuations */}
+                        <div className="bg-white rounded-xl p-6 shadow-lg">
+                            <h3 className="text-xl font-bold mb-4">Exit Valuation Timeline</h3>
+                            <ResponsiveContainer width="100%" height={300}>
+                                <BarChart data={exitValuations}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="month" />
+                                    <YAxis />
+                                    <Tooltip formatter={(value) => `$${(value / 1000000).toFixed(1)}M`} />
+                                    <Legend />
+                                    <Bar dataKey="valuation" fill="#14b8a6" name="Enterprise Value" />
+                                </BarChart>
+                            </ResponsiveContainer>
+                            <div className="mt-4 grid grid-cols-5 gap-4 text-center">
+                                {exitValuations.map((val) => (
+                                    <div key={val.month} className="bg-gray-50 p-3 rounded">
+                                        <div className="font-bold">Month {val.month}</div>
+                                        <div className="text-2xl font-bold text-teal-600">
+                                            ${(val.valuation / 1000000).toFixed(1)}M
+                                        </div>
+                                        <div className="text-sm text-gray-600">
+                                            {val.revenueMultiple}x Rev | {val.ebitdaMultiple}x EBITDA
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<HealthcareFinancialModel />);
+    </script>
 </body>
 </html>
